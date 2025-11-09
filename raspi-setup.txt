@@ -1,0 +1,261 @@
+# Raspberry Pi Weather Station
+
+Revised: 26.10.2018
+
+## Image
+
+https://downloads.raspberrypi.org/raspbian_lite_latest
+
+dd if=2018-10-09-raspbian-stretch-lite.img of=/dev/sdc bs=64k
+sync
+
+mount /dev/sdc...
+
+touch /boot/ssh
+
+
+# gparted - resize: 1Gb (/), xxGb (/home)
+
+# dd if=/dev/sdc of=rpi-ro-170622.img bs=1M count=1200
+# sync
+
+
+## Config
+
+ssh XX.XX.XX.XX -l pi
+Password: raspberry
+
+ssh-keygen -A
+
+
+raspi-config:
+    locale: en_US.UTF-8
+    timezone: Asia/Irkutsk
+    keyboard: English-US
+    user: pi, password: pi
+    boot: commandline
+    GPU memory: minimum
+    ssh: enable
+    device tree: enable
+    camera: enable
+    i2c: enable
+    network: hostname,predicatble names
+#    spi: enable
+#   1-wire: enable 
+
+locale-gen
+
+export LANGUAGE=en_US.UTF-8
+export LANG=en_US.UTF-8
+export LC_ALL=en_US.UTF-8
+locale-gen en_US.UTF-8
+dpkg-reconfigure locales
+
+systemctl disable dhcpcd
+
+https://wiki.archlinux.org/index.php/dhcpcd
+
+
+/etc/network/interfaces:
+
+auto lo
+iface lo inet loopback
+
+auto eth0
+iface eth0 inet manual|static
+    address 10.xx.xx.yy
+    netmask 255.255.255.0
+#    gateway 10.xx.xx.zz
+
+allow-hotplug wlan0
+iface wlan0 inet dhcp
+    wpa-conf /etc/wpa_supplicant/wpa_supplicant.conf
+    dns-nameservers 77.88.8.8  8.8.8.8
+#.
+
+
+wpa_supplicant.conf:
+
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+
+network={
+        ssid="wifi-name"
+#        psk=""
+#        scan_ssid=1
+        key_mgmt=NONE
+}
+
+#.
+
+
+echo "" > /etc/motd
+
+
+apt update
+apt upgrade
+
+apt purge -y --auto-remove dphys-swapfile fake-hwclock
+apt -y autoremove
+
+apt install vim ntpdate wvdial
+# apt install usb-modeswitch
+# apt install python3-picamera
+
+/etc/wvdial.conf:
+
+[Dialer Defaults]
+Init1 = ATZ
+Init2 = ATQ0 V1 E1 S0=0 &C1 &D2 +FCLASS=0
+Modem Type = Analog Modem
+Baud = 9600
+New PPPD = yes
+Modem = /dev/ttyUSB0
+ISDN = 0
+
+[Dialer 3g]
+Modem = /dev/ttyUSB0
+Baud = 115200
+Init1 = ATZ
+Init2 = AT+CGDCONT=1,"IP","internet"
+Dial Command = ATD
+Phone = *99#
+# Phone = *99***1#
+Stupid Mode = 1
+Username = \n
+Password = \n
+
+#.
+
+
+/etc/rc.local:
+
+while : ; do wvdial 3g; sleep 3; done &
+
+#.
+
+
+/etc/fstab:
+
+proc            /proc  proc    defaults                              0 0
+/dev/mmcblk0p1  /boot  vfat    ro                                    0 2
+/dev/mmcblk0p2  /      ext4    ro                                    0 1
+#/dev/mmcblk0p3  /home  ext4    defaults,noatime                      0 2
+tmpfs  /tmp            tmpfs   defaults,mode=1777,size=1M            0 0
+tmpfs  /var/tmp        tmpfs   nodev,nosuid,mode=0755,size=1M        0 0
+tmpfs  /var/log        tmpfs   nodev,nosuid,mode=0755,size=1M        0 0
+tmpfs  /var/lock       tmpfs   nodev,nosuid,mode=0755,size=64k       0 0
+tmpfs  /var/lib/sudo   tmpfs   nodev,nosuid,mode=0700,size=64k       0 0
+
+#.
+
+rm /var/lock
+mkdir /var/lock
+
+
+
+/boot/cmdline.txt +ro
+
+
+rm /etc/cron.weekly/man.db 
+rm /etc/cron.daily/man.db
+rm from /etc/cron.daily/all except [logrotate,ntp]
+
+
+mount --bind / /mnt
+rm /mnt/var/log/*
+rm /mnt/var/swap
+
+
+/etc/cron.daily/logrotate:
+
+#!/bin/sh
+test -x /usr/sbin/logrotate || exit 0
+/usr/sbin/logrotate --state /var/log/.logrotate.state /etc/logrotate.conf
+
+#.
+
+
+mount / -o remount,rw
+    ...
+mount / -o remount,ro
+
+
+# NOTE: -g already there ...
+#
+/usr/lib/dhcpcd/dhcpcd-hooks/50-ntp:
+/etc/default/ntp
+
+#!/bin/sh
+case "${reason}" in
+    BOUND|INFORM|REBIND|REBOOT|RENEW|TIMEOUT|STATIC)
+        # "-g" allows for large time differences
+        ntpd -qg
+        ;;
+esac
+#.
+
+
+#sudo modprobe w1-gpio
+sudo modprobe w1-therm
+cd /sys/bus/w1/devices/
+ls 
+
+
+/boot/config.txt: ?
+# 1-wire settings 
+dtoverlay=w1-gpio,gpiopin=4
+
+
+### Serial Number
+
+cat /proc/cpuinfo | grep Serial | cut -d ':' -f 2
+
+
+### GPIO setup
+
+# apt install build-essential
+apt install python-pip python-dev python-smbus git
+git clone https://github.com/adafruit/Adafruit_Python_GPIO.git
+cd Adafruit_Python_GPIO
+python setup.py install
+
+
+### BMP085
+
+git clone https://github.com/adafruit/Adafruit_Python_BMP
+cd Adafruit_Python_BMP
+python setup.py install
+
+
+Header pins:
+  1 - 3.3V
+  3 - SDA
+  5 - SCL
+  7 - 
+  9 - GND
+
+
+4-wires cable:
+
+  black  [GN +3] red
+  white  [CL DA] green
+    
+
+### Other
+
+http://archive.raspbian.org/raspbian/dists/wheezy/main/binary-armhf/Packages
+
+/etc/apt/sources.list:
+deb http://archive.raspbian.org/raspbian wheezy main contrib non-free rpi
+deb-src http://archive.raspbian.org/raspbian wheezy main contrib non-free rpi
+#.
+
+wget http://archive.raspbian.org/raspbian.public.key -O - | sudo apt-key add -
+#
+
+-march=armv6
+-mfpu=vfp
+-mfloat-abi=hard
+
+###.
