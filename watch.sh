@@ -1,6 +1,6 @@
 #!/bin/sh
 
-# /www/watch.sh:
+# /home/pi/watch.sh:
 
 if ! ping -q -c 1 -W 9  "rs.angara.net"  > /dev/null; 
 then
